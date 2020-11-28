@@ -69,6 +69,9 @@ class Session(metaclass=Singleton):
 
         self._map_attrs = {
             'mode': ('session', 'mode'),
+            'remote_host': ('session', 'remote_host'),
+            'remote_port': ('session', 'remote_port'),
+            'remote_parameters': ('session', 'remote_parameters'),
             'project_status': ('session', 'status'),
             'debug': ('session', 'debug'),
             'language': ('session', 'language'),
@@ -95,6 +98,26 @@ class Session(metaclass=Singleton):
                 'surface_interpolation': 1,
                 'rendering': 0,
                 'slice_interpolation': 0,
+                'remote_host': '127.0.0.1',
+                'remote_port': 8001,
+                'remote_parameters': [
+                    {
+                        'name': 'Intensity',
+                        'getter': 'GetIntensity',
+                        'setter': 'SetIntensity',
+                        'unit': 'mV',
+                        'min_value': 1,
+                        'max_value': 1000,
+                    },
+                    {
+                        'name': 'Inter-trial interval',
+                        'getter': 'GetITI',
+                        'setter': 'SetITI',
+                        'unit': 'ms',
+                        'min_value': 1,
+                        'max_value': 5000,
+                    },
+                ],
             },
 
             'project': {

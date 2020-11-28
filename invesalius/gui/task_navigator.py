@@ -18,12 +18,14 @@
 #--------------------------------------------------------------------------
 
 from functools import partial
+import json
 # import os
 import queue
 import sys
 import threading
 
 import numpy as np
+import requests
 # import Trekker
 import wx
 
@@ -52,6 +54,7 @@ import invesalius.data.trigger as trig
 import invesalius.data.record_coords as rec
 import invesalius.data.vtk_utils as vtk_utils
 import invesalius.gui.dialogs as dlg
+import invesalius.session as ses
 from invesalius import utils
 
 BTN_NEW = wx.NewId()
@@ -140,7 +143,7 @@ class InnerFoldPanel(wx.Panel):
         # Study this.
 
         fold_panel = fpb.FoldPanelBar(self, -1, wx.DefaultPosition,
-                                      (10, 310), 0, fpb.FPB_SINGLE_FOLD)
+                                      (10, 510), 0, fpb.FPB_SINGLE_FOLD)
         # Fold panel style
         style = fpb.CaptionBarStyle()
         style.SetCaptionStyle(fpb.CAPTIONBAR_GRADIENT_V)
@@ -170,6 +173,14 @@ class InnerFoldPanel(wx.Panel):
 
         fold_panel.ApplyCaptionStyle(item, style)
         fold_panel.AddFoldPanelWindow(item, mtw, spacing= 0,
+                                      leftSpacing=0, rightSpacing=0)
+
+        # Fold 4 - Transcranial magnetic stimulation panel
+        item = fold_panel.AddFoldPanel(_("Transcranial magnetic stimulation"), collapsed=True)
+        ttw = TmsPanel(item)
+
+        fold_panel.ApplyCaptionStyle(item, style)
+        fold_panel.AddFoldPanelWindow(item, ttw, spacing=0,
                                       leftSpacing=0, rightSpacing=0)
 
         # Fold 4 - Tractography panel
@@ -820,6 +831,161 @@ class NeuronavigationPanel(wx.Panel):
         Publisher.sendMessage("Remove tracts")
         # TODO: Reset camera initial focus
         Publisher.sendMessage('Reset cam clipping range')
+
+
+class TmsPanel(wx.Panel):
+    def __init__(self, parent):
+        session = ses.Session()
+
+        wx.Panel.__init__(self, parent)
+        try:
+            default_colour = wx.SystemSettings.GetColour(wx.SYS_COLOUR_MENUBAR)
+        except AttributeError:
+            default_colour = wx.SystemSettings_GetColour(wx.SYS_COLOUR_MENUBAR)
+        self.SetBackgroundColour(default_colour)
+
+        self.coil_list = const.COIL
+
+        self.host = session.remote_host
+        self.port = session.remote_port
+        self.parameters = session.remote_parameters
+
+        self.nav_prop = None
+        self.obj_fiducials = None
+        self.obj_orients = None
+        self.obj_ref_mode = None
+        self.obj_name = None
+        self.timestamp = const.TIMESTAMP
+
+        self.SetAutoLayout(1)
+        self.__bind_events()
+
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Display host
+        text = wx.StaticText(self, -1, _('Host: {}'.format(self.host)))
+        main_sizer.Add(text, 0, wx.ALIGN_LEFT | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+        # Display port
+        text = wx.StaticText(self, -1, _('Port: {}'.format(self.port)))
+        main_sizer.Add(text, 0, wx.ALIGN_LEFT | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+        # Button for initialization
+        tooltip = wx.ToolTip(_("Initialize"))
+        btn_init = wx.Button(self, -1, _("Initialize"), size=wx.Size(150, 23))
+        btn_init.SetToolTip(tooltip)
+        btn_init.Enable(1)
+        btn_init.Bind(wx.EVT_BUTTON, self.OnInitialize)
+
+        main_sizer.Add(btn_init, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+        self.btns_getter = [None] * len(self.parameters)
+
+        # Getters and setters for remote parameters
+        for i in range(len(self.parameters)):
+            param = self.parameters[i]
+
+            name = param['name']
+            unit = param['unit']
+            getter = param['getter']
+            setter = param['setter']
+            min_value = param['min_value']
+            max_value = param['max_value']
+
+            # Display parameter name
+            text_str = '{} [{}]'.format(name, unit)
+            text = wx.StaticText(self, -1, _(text_str))
+            font = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.BOLD)
+            text.SetFont(font)
+            main_sizer.Add(text, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+            # Display parameter range
+            text_str = 'Allowed range: {}–{}'.format(min_value, max_value)
+            text = wx.StaticText(self, -1, _(text_str))
+            main_sizer.Add(text, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+            # Display new value
+            text_setter = wx.StaticText(self, -1, _("New value"), style=wx.ST_NO_AUTORESIZE)
+            spinctrl_setter = wx.SpinCtrl(self, -1, "", size=wx.Size(50, 23))
+            spinctrl_setter.SetRange(min_value, max_value)
+            spinctrl_setter.SetValue(0)
+
+            # Button for setting the value
+            tooltip = wx.ToolTip(_("Set"))
+            btn_setter = wx.Button(self, -1, _("Set"), size=wx.Size(60, 23))
+            btn_setter.SetToolTip(tooltip)
+            btn_setter.Enable(1)
+            btn_setter.Bind(wx.EVT_BUTTON, partial(self.OnSetValue, ctrl=spinctrl_setter, endpoint=setter))
+
+            # Align horizontally
+            line_set = wx.BoxSizer(wx.HORIZONTAL)
+            line_set.Add(text_setter, 1, wx.ALIGN_LEFT | wx.LEFT | wx.TOP | wx.RIGHT, 4)
+            line_set.Add(spinctrl_setter, 1, wx.ALIGN_LEFT | wx.LEFT | wx.TOP | wx.RIGHT, 4)
+            line_set.Add(btn_setter, 1, wx.ALIGN_RIGHT | wx.LEFT | wx.TOP | wx.RIGHT, 4)
+
+            # Display current value
+            text_getter = wx.StaticText(self, -1, _("Current value"), style=wx.ST_NO_AUTORESIZE)
+            spinctrl_getter = wx.SpinCtrl(self, -1, "", size=wx.Size(50, 23))
+            spinctrl_getter.SetRange(min_value, max_value)
+            spinctrl_getter.SetValue(0)
+            spinctrl_getter.Enable(False)
+
+            # Button for getting the value
+            tooltip = wx.ToolTip(_("Get"))
+            btn_getter = wx.Button(self, -1, _("Get"), size=wx.Size(60, 23))
+            btn_getter.SetToolTip(tooltip)
+            btn_getter.Enable(1)
+            btn_getter.Bind(wx.EVT_BUTTON, partial(self.OnGetValue, ctrl=spinctrl_getter, endpoint=getter, spinctrl_setter=spinctrl_setter))
+
+            self.btns_getter[i] = btn_getter
+
+            # Align horizontally
+            line_get = wx.BoxSizer(wx.HORIZONTAL)
+            line_get.Add(text_getter, 1, wx.ALIGN_LEFT | wx.LEFT | wx.TOP | wx.RIGHT, 4)
+            line_get.Add(spinctrl_getter, 1, wx.ALIGN_LEFT | wx.LEFT | wx.TOP | wx.RIGHT, 4)
+            line_get.Add(btn_getter, 1, wx.ALIGN_RIGHT | wx.LEFT | wx.TOP | wx.RIGHT, 4)
+
+            # Add getter and setter to main sizer
+            main_sizer.Add(line_get, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 5)
+            main_sizer.Add(line_set, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 5)
+
+        main_sizer.Fit(self)
+
+        self.SetSizer(main_sizer)
+        self.Update()
+
+    def __bind_events(self):
+        Publisher.subscribe(self.UpdateNavigationStatus, 'Navigation status')
+        Publisher.subscribe(self.OnCloseProject, 'Close project data')
+
+    def UpdateNavigationStatus(self, nav_status, vis_status):
+        # Doesn't work
+        if nav_status:
+            self.btn_setter.Enable(0)
+        else:
+            self.btn_setter.Enable(1)
+
+    def OnInitialize(self, evt):
+        for btn in self.btns_getter:
+            evt = wx.PyCommandEvent(wx.EVT_BUTTON.typeId, self.GetId())
+            wx.PostEvent(btn, evt)
+
+    def OnSetValue(self, evt, ctrl, endpoint):
+        new_value = ctrl.GetValue()
+        pload = {'value': new_value}
+        url = 'http://{}:{}/WebAPI/{}'.format(self.host, self.port, endpoint)
+        r = requests.post(url, data=pload)
+
+    def OnGetValue(self, evt, ctrl, endpoint, spinctrl_setter):
+        url = 'http://{}:{}/WebAPI/{}'.format(self.host, self.port, endpoint)
+        r = requests.get(url)
+        parsed = json.loads(r.text)
+        new_value = parsed['value']
+        ctrl.SetValue(new_value)
+        spinctrl_setter.SetValue(new_value)
+
+    def OnCloseProject(self):
+        print("TBD")
 
 
 class ObjectRegistrationPanel(wx.Panel):
@@ -1778,7 +1944,6 @@ class TractographyPanel(wx.Panel):
         Publisher.sendMessage('End busy cursor')
 
     def OnLoadParameters(self, event=None):
-        import json
         filename = dlg.ShowLoadSaveDialog(message=_(u"Load Trekker configuration"),
                                           wildcard=_("JSON file (*.json)|*.json"))
         try:
