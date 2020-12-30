@@ -18,12 +18,14 @@
 #--------------------------------------------------------------------------
 
 from functools import partial
+import json
 # import os
 import queue
 import sys
 import threading
 
 import numpy as np
+import socketio
 # import Trekker
 import wx
 
@@ -52,6 +54,7 @@ import invesalius.data.trigger as trig
 import invesalius.data.record_coords as rec
 import invesalius.data.vtk_utils as vtk_utils
 import invesalius.gui.dialogs as dlg
+import invesalius.session as ses
 from invesalius import utils
 
 BTN_NEW = wx.NewId()
@@ -140,7 +143,7 @@ class InnerFoldPanel(wx.Panel):
         # Study this.
 
         fold_panel = fpb.FoldPanelBar(self, -1, wx.DefaultPosition,
-                                      (10, 310), 0, fpb.FPB_SINGLE_FOLD)
+                                      (10, 510), 0, fpb.FPB_SINGLE_FOLD)
         # Fold panel style
         style = fpb.CaptionBarStyle()
         style.SetCaptionStyle(fpb.CAPTIONBAR_GRADIENT_V)
@@ -170,6 +173,14 @@ class InnerFoldPanel(wx.Panel):
 
         fold_panel.ApplyCaptionStyle(item, style)
         fold_panel.AddFoldPanelWindow(item, mtw, spacing= 0,
+                                      leftSpacing=0, rightSpacing=0)
+
+        # Fold 4 - Transcranial magnetic stimulation panel
+        item = fold_panel.AddFoldPanel(_("Transcranial magnetic stimulation"), collapsed=True)
+        ttw = TmsPanel(item)
+
+        fold_panel.ApplyCaptionStyle(item, style)
+        fold_panel.AddFoldPanelWindow(item, ttw, spacing=0,
                                       leftSpacing=0, rightSpacing=0)
 
         # Fold 4 - Tractography panel
@@ -819,6 +830,131 @@ class NeuronavigationPanel(wx.Panel):
         Publisher.sendMessage("Remove tracts")
         # TODO: Reset camera initial focus
         Publisher.sendMessage('Reset cam clipping range')
+
+
+class TmsPanel(wx.Panel):
+    def __init__(self, parent):
+        session = ses.Session()
+
+        wx.Panel.__init__(self, parent)
+        try:
+            default_colour = wx.SystemSettings.GetColour(wx.SYS_COLOUR_MENUBAR)
+        except AttributeError:
+            default_colour = wx.SystemSettings_GetColour(wx.SYS_COLOUR_MENUBAR)
+        self.SetBackgroundColour(default_colour)
+
+        self.coil_list = const.COIL
+
+        self.host = session.remote_host
+        self.port = session.remote_port
+        self.parameters = session.remote_parameters
+
+        self.nav_prop = None
+        self.obj_fiducials = None
+        self.obj_orients = None
+        self.obj_ref_mode = None
+        self.obj_name = None
+        self.timestamp = const.TIMESTAMP
+
+        self.SetAutoLayout(1)
+        self.__bind_events()
+
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Button for connecting
+        tooltip = wx.ToolTip(_("Connect"))
+        btn_init = wx.Button(self, -1, _("Connect"), size=wx.Size(150, 23))
+        btn_init.SetToolTip(tooltip)
+        btn_init.Enable(1)
+        btn_init.Bind(wx.EVT_BUTTON, self.OnInitialize)
+
+        main_sizer.Add(btn_init, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+        self.spinctrls_current_value = {}
+
+        coord_sizer = wx.GridBagSizer(hgap=0, vgap=0)
+
+        # Display and set remote parameters
+        for i in range(len(self.parameters)):
+            param = self.parameters[i]
+
+            text = param['text']
+            name = param['name']
+            unit = param['unit']
+            min_value = param['min_value']
+            max_value = param['max_value']
+
+            # Display parameter text
+            text_str = '{} [{}]'.format(text, unit)
+            font = wx.Font(8, wx.DEFAULT, wx.NORMAL, wx.NORMAL)
+
+            text_element = wx.StaticText(self, -1, _(text_str))
+            text_element.SetFont(font)
+
+            # Display current value
+            spinctrl_current_value = wx.SpinCtrl(self, -1, "", size=wx.Size(50, 23))
+            spinctrl_current_value.SetRange(min_value, max_value)
+            spinctrl_current_value.SetValue(0)
+            spinctrl_current_value.Enable(False)
+
+            self.spinctrls_current_value[name] = spinctrl_current_value
+
+            # Display new value
+            spinctrl_new_value = wx.SpinCtrl(self, -1, "", size=wx.Size(50, 23))
+            spinctrl_new_value.SetRange(min_value, max_value)
+            spinctrl_new_value.SetValue(0)
+
+            # Button for setting new value
+            tooltip = wx.ToolTip(_("Set"))
+            btn_set = wx.Button(self, -1, _("Set"), size=wx.Size(60, 23))
+            btn_set.SetToolTip(tooltip)
+            btn_set.Enable(1)
+            btn_set.Bind(wx.EVT_BUTTON, partial(self.OnSetValue, ctrl=spinctrl_new_value, name=name))
+
+            coord_sizer.Add(text_element, pos=wx.GBPosition(i, 0))
+            coord_sizer.Add(spinctrl_current_value, pos=wx.GBPosition(i, 1))
+            coord_sizer.Add(spinctrl_new_value, pos=wx.GBPosition(i, 2))
+            coord_sizer.Add(btn_set, pos=wx.GBPosition(i, 3))
+
+        main_sizer.Add(coord_sizer, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 0)
+        main_sizer.Fit(self)
+
+        self.SetSizer(main_sizer)
+        self.Update()
+
+    def __bind_events(self):
+        Publisher.subscribe(self.UpdateNavigationStatus, 'Navigation status')
+        Publisher.subscribe(self.OnCloseProject, 'Close project data')
+
+    def UpdateNavigationStatus(self, nav_status, vis_status):
+        # Doesn't work
+        if nav_status:
+            self.btn_setter.Enable(0)
+        else:
+            self.btn_setter.Enable(1)
+
+    def OnInitialize(self, evt):
+        url = 'http://{}:{}'.format(self.host, self.port)
+
+        self.sio = socketio.Client()
+        self.sio.connect(url, namespaces=['/parameters'])
+
+        @self.sio.event(namespace='/parameters')
+        def update_parameter(data):
+            name = data['name']
+            value = data['value']
+            self.spinctrls_current_value[name].SetValue(value)
+
+    def OnSetValue(self, evt, ctrl, name):
+        value = ctrl.GetValue()
+        data = {
+            'name': name,
+            'value': value,
+        }
+        self.sio.emit('update_parameter', data, namespace='/parameters')
+
+    def OnCloseProject(self):
+        print("TBD")
 
 
 class ObjectRegistrationPanel(wx.Panel):
@@ -1777,7 +1913,6 @@ class TractographyPanel(wx.Panel):
         Publisher.sendMessage('End busy cursor')
 
     def OnLoadParameters(self, event=None):
-        import json
         filename = dlg.ShowLoadSaveDialog(message=_(u"Load Trekker configuration"),
                                           wildcard=_("JSON file (*.json)|*.json"))
         try:
