@@ -848,6 +848,9 @@ class TmsPanel(wx.Panel):
         self.host = session.remote_host
         self.port = session.remote_port
         self.parameters = session.remote_parameters
+        self.commands = session.remote_commands
+
+        self.sio = socketio.Client()
 
         self.nav_prop = None
         self.obj_fiducials = None
@@ -866,7 +869,7 @@ class TmsPanel(wx.Panel):
         btn_init = wx.Button(self, -1, _("Connect"), size=wx.Size(150, 23))
         btn_init.SetToolTip(tooltip)
         btn_init.Enable(1)
-        btn_init.Bind(wx.EVT_BUTTON, self.OnInitialize)
+        btn_init.Bind(wx.EVT_BUTTON, self.OnConnect)
 
         main_sizer.Add(btn_init, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
 
@@ -917,8 +920,24 @@ class TmsPanel(wx.Panel):
             coord_sizer.Add(btn_set, pos=wx.GBPosition(i, 3))
 
         main_sizer.Add(coord_sizer, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 0)
-        main_sizer.Fit(self)
 
+        # Buttons for remote commands
+        for i in range(len(self.commands)):
+            command = self.commands[i]
+
+            text = command['text']
+            name = command['name']
+
+            # Button for command
+            tooltip = wx.ToolTip(_(text))
+            btn_command = wx.Button(self, -1, _(text), size=wx.Size(60, 23))
+            btn_command.SetToolTip(tooltip)
+            btn_command.Enable(1)
+            btn_command.Bind(wx.EVT_BUTTON, partial(self.OnCommand, name=name))
+
+            main_sizer.Add(btn_command, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+
+        main_sizer.Fit(self)
         self.SetSizer(main_sizer)
         self.Update()
 
@@ -933,11 +952,9 @@ class TmsPanel(wx.Panel):
         else:
             self.btn_setter.Enable(1)
 
-    def OnInitialize(self, evt):
+    def OnConnect(self, evt):
         url = 'http://{}:{}'.format(self.host, self.port)
-
-        self.sio = socketio.Client()
-        self.sio.connect(url, namespaces=['/parameters'])
+        self.sio.connect(url, namespaces=['/parameters', '/commands'])
 
         @self.sio.event(namespace='/parameters')
         def update_parameter(data):
@@ -952,6 +969,9 @@ class TmsPanel(wx.Panel):
             'value': value,
         }
         self.sio.emit('update_parameter', data, namespace='/parameters')
+
+    def OnCommand(self, evt, name):
+        self.sio.emit('command', name, namespace='/commands')
 
     def OnCloseProject(self):
         print("TBD")
