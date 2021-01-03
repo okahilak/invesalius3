@@ -179,6 +179,7 @@ class InnerFoldPanel(wx.Panel):
         item = fold_panel.AddFoldPanel(_("Transcranial magnetic stimulation"), collapsed=True)
         ttw = TmsPanel(item)
 
+
         fold_panel.ApplyCaptionStyle(item, style)
         fold_panel.AddFoldPanelWindow(item, ttw, spacing=0,
                                       leftSpacing=0, rightSpacing=0)
@@ -922,6 +923,7 @@ class TmsPanel(wx.Panel):
         main_sizer.Add(coord_sizer, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 0)
 
         # Buttons for remote commands
+        line_buttons = wx.BoxSizer(wx.HORIZONTAL)
         for i in range(len(self.commands)):
             command = self.commands[i]
 
@@ -935,7 +937,9 @@ class TmsPanel(wx.Panel):
             btn_command.Enable(1)
             btn_command.Bind(wx.EVT_BUTTON, partial(self.OnCommand, name=name))
 
-            main_sizer.Add(btn_command, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+            line_buttons.Add(btn_command, 1, wx.LEFT | wx.TOP | wx.RIGHT, 4)
+
+        main_sizer.Add(line_buttons, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 5)
 
         main_sizer.Fit(self)
         self.SetSizer(main_sizer)
