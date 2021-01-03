@@ -73,6 +73,7 @@ class Session(metaclass=Singleton):
             'remote_port': ('session', 'remote_port'),
             'remote_parameters': ('session', 'remote_parameters'),
             'remote_commands': ('session', 'remote_commands'),
+            'remote_state': ('session', 'remote_state'),
             'project_status': ('session', 'status'),
             'debug': ('session', 'debug'),
             'language': ('session', 'language'),
@@ -136,6 +137,16 @@ class Session(metaclass=Singleton):
                     {
                         'text': 'Abort',
                         'name': 'abort',
+                    },
+                ],
+                'remote_state': [
+                    {
+                        'text': 'Stimulating',
+                        'name': 'stimulating',
+                    },
+                    {
+                        'text': 'Recharging',
+                        'name': 'recharging',
                     },
                 ],
             },

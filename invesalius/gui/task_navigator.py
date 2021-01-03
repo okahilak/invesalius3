@@ -850,6 +850,7 @@ class TmsPanel(wx.Panel):
         self.port = session.remote_port
         self.parameters = session.remote_parameters
         self.commands = session.remote_commands
+        self.state_variables = session.remote_state
 
         self.sio = socketio.Client()
 
@@ -872,9 +873,8 @@ class TmsPanel(wx.Panel):
         btn_init.Enable(1)
         btn_init.Bind(wx.EVT_BUTTON, self.OnConnect)
 
-        main_sizer.Add(btn_init, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
-
         self.spinctrls_current_value = {}
+        self.current_state = {}
 
         coord_sizer = wx.GridBagSizer(hgap=0, vgap=0)
 
@@ -920,8 +920,6 @@ class TmsPanel(wx.Panel):
             coord_sizer.Add(spinctrl_new_value, pos=wx.GBPosition(i, 2))
             coord_sizer.Add(btn_set, pos=wx.GBPosition(i, 3))
 
-        main_sizer.Add(coord_sizer, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 0)
-
         # Buttons for remote commands
         line_buttons = wx.BoxSizer(wx.HORIZONTAL)
         for i in range(len(self.commands)):
@@ -939,7 +937,33 @@ class TmsPanel(wx.Panel):
 
             line_buttons.Add(btn_command, 1, wx.LEFT | wx.TOP | wx.RIGHT, 4)
 
+        main_sizer.Add(btn_init, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT | wx.TOP, 5)
+        main_sizer.Add(coord_sizer, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 0)
         main_sizer.Add(line_buttons, 0, wx.LEFT | wx.RIGHT | wx.TOP | wx.ALIGN_CENTER_HORIZONTAL, 5)
+
+        # Text fields for remote state
+        for i in range(len(self.state_variables)):
+            state_variable = self.state_variables[i]
+
+            text = state_variable['text']
+            name = state_variable['name']
+
+            line_state = wx.BoxSizer(wx.HORIZONTAL)
+
+            # Text for state variable
+            text_str = '{}:'.format(text)
+            text_element = wx.StaticText(self, -1, _(text_str))
+
+            # Value for state variable
+            value_str = 'esko'
+            value_element = wx.StaticText(self, -1, _(value_str))
+
+            line_state.Add(text_element, 1, wx.LEFT | wx.TOP | wx.RIGHT, 4)
+            line_state.Add(value_element, 1, wx.LEFT | wx.TOP | wx.RIGHT, 4)
+
+            main_sizer.Add(line_state, 1, wx.LEFT | wx.TOP | wx.RIGHT, 4)
+
+            self.current_state[name] = value_element
 
         main_sizer.Fit(self)
         self.SetSizer(main_sizer)
@@ -958,13 +982,19 @@ class TmsPanel(wx.Panel):
 
     def OnConnect(self, evt):
         url = 'http://{}:{}'.format(self.host, self.port)
-        self.sio.connect(url, namespaces=['/parameters', '/commands'])
+        self.sio.connect(url, namespaces=['/parameters', '/commands', '/state'])
 
         @self.sio.event(namespace='/parameters')
         def update_parameter(data):
             name = data['name']
             value = data['value']
             self.spinctrls_current_value[name].SetValue(value)
+
+        @self.sio.event(namespace='/state')
+        def update_state(data):
+            state_variable = data['state_variable']
+            value = data['value']
+            self.current_state[state_variable].SetLabel(value)
 
     def OnSetValue(self, evt, ctrl, name):
         value = ctrl.GetValue()
