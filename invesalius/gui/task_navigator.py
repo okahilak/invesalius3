@@ -951,11 +951,11 @@ class TmsPanel(wx.Panel):
             line_state = wx.BoxSizer(wx.HORIZONTAL)
 
             # Text for state variable
-            text_str = '{}:'.format(text)
+            text_str = '{}'.format(text)
             text_element = wx.StaticText(self, -1, _(text_str))
 
             # Value for state variable
-            value_str = 'esko'
+            value_str = '\u2610'
             value_element = wx.StaticText(self, -1, _(value_str))
 
             line_state.Add(text_element, 1, wx.LEFT | wx.TOP | wx.RIGHT, 4)
@@ -982,19 +982,19 @@ class TmsPanel(wx.Panel):
 
     def OnConnect(self, evt):
         url = 'http://{}:{}'.format(self.host, self.port)
-        self.sio.connect(url, namespaces=['/parameters', '/commands', '/state'])
+        self.sio.connect(url)
 
-        @self.sio.event(namespace='/parameters')
+        @self.sio.event()
         def update_parameter(data):
             name = data['name']
             value = data['value']
             self.spinctrls_current_value[name].SetValue(value)
 
-        @self.sio.event(namespace='/state')
+        @self.sio.event()
         def update_state(data):
             state_variable = data['state_variable']
             value = data['value']
-            self.current_state[state_variable].SetLabel(value)
+            self.current_state[state_variable].SetLabel('\u2611' if value == b'True' else '\u2610')
 
     def OnSetValue(self, evt, ctrl, name):
         value = ctrl.GetValue()
@@ -1002,10 +1002,10 @@ class TmsPanel(wx.Panel):
             'name': name,
             'value': value,
         }
-        self.sio.emit('update_parameter', data, namespace='/parameters')
+        self.sio.emit('update_parameter', data)
 
     def OnCommand(self, evt, name):
-        self.sio.emit('command', name, namespace='/commands')
+        self.sio.emit('command', name)
 
     def OnCloseProject(self):
         print("TBD")
